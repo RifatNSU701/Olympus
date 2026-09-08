@@ -2,27 +2,40 @@ mod auth;
 mod auth_api;
 mod db;
 mod health;
+mod state;
 
-use axum::{extract::State, routing::{get, post}, Router};
+use axum::{extract::State, middleware, routing::{get, post}, Extension, Json, Router};
+use serde::Serialize;
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
+use uuid::Uuid;
+use crate::{auth::Claims, state::AppState};
 
-async fn me(State(_pool): State<sqlx::PgPool>) -> &'static str { "authenticated" }
+#[derive(Serialize)]
+struct Identity { id: Uuid, email: String, role: String }
+
+async fn me(Extension(claims): Extension<Claims>) -> Json<Identity> {
+    Json(Identity { id: claims.sub, email: claims.email, role: claims.role })
+}
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "olympus_core=info,tower_http=info".into())).json().init();
     dotenvy::dotenv().ok();
     let pool = db::connect().await.expect("PostgreSQL connection required");
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
-    let auth_state = (pool.clone(), secret);
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
+    let state = AppState { pool, jwt_secret };
+
+    let protected = Router::new()
+        .route("/api/v1/auth/me", get(me))
+        .layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
 
     let app = Router::new()
         .route("/health", get(health::health))
         .route("/api/v1/auth/register", post(auth_api::register))
         .route("/api/v1/auth/login", post(auth_api::login))
-        .route("/api/v1/auth/me", get(me))
-        .with_state(auth_state)
+        .merge(protected)
+        .with_state(state)
         .layer(TraceLayer::new_for_http());
 
     let port = std::env::var("PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(8080);

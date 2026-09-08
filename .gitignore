@@ -1,2 +1,11 @@
-/build/
-/nbproject/private/
+node_modules/
+.next/
+out/
+target/
+.env
+.env.*
+!.env.example
+*.log
+.idea/
+.vscode/
+.DS_Store

@@ -37,12 +37,11 @@ pub async fn require_auth(
 }
 
 pub async fn check_user(state: &AppState, user_id: Uuid) -> Result<(), sqlx::Error> {
-    let user_exists =
-        sqlx::query("SELECT 1 FROM users WHERE id = $1 AND status = 'ACTIVE'")
-            .bind(user_id)
-            .fetch_optional(&state.pool)
-            .await?
-            .is_some();
+    let user_exists = sqlx::query("SELECT 1 FROM users WHERE id = $1 AND status = 'ACTIVE'")
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .is_some();
 
     if user_exists {
         Ok(())

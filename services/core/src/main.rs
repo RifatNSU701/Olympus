@@ -7,9 +7,9 @@ mod products;
 mod state;
 
 use axum::{
-    extract::Extension,
     middleware,
     routing::{get, post, put},
+    extract::Extension,
     Json, Router,
 };
 use serde::Serialize;
@@ -61,8 +61,10 @@ async fn main() {
             "/api/v1/cart/items/{item_id}",
             put(cart::update).delete(cart::remove),
         )
-        .layer(middleware::from_fn(auth::require_auth))
-        .layer(Extension(state.clone()));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
 
     let app = Router::new()
         .route("/health", get(health::health))

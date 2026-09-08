@@ -18,9 +18,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/core/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('services/core/Cargo.toml', 'services/core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: Check
-        run: cargo check --locked
+        run: cargo check
       - name: Test
-        run: cargo test --locked
+        run: cargo test
       - name: Format
         run: cargo fmt --check

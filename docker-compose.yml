@@ -3,18 +3,18 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: hive
-      POSTGRES_USER: hive
-      POSTGRES_PASSWORD: hive
+      POSTGRES_DB: olympus
+      POSTGRES_USER: olympus
+      POSTGRES_PASSWORD: olympus
     ports:
       - "5432:5432"
     volumes:
-      - hive-postgres:/var/lib/postgresql/data
+      - olympus-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hive -d hive"]
+      test: ["CMD-SHELL", "pg_isready -U olympus -d olympus"]
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  hive-postgres:
+  olympus-postgres:

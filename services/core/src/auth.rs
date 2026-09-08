@@ -47,21 +47,3 @@ pub async fn require_auth(
     request.extensions_mut().insert(decoded.claims);
     Ok(next.run(request).await)
 }
-
-pub async fn require_role(
-    State(_state): State<AppState>,
-    request: Request<Body>,
-    next: Next,
-    allowed_roles: &'static [&'static str],
-) -> Result<Response, StatusCode> {
-    let claims = request
-        .extensions()
-        .get::<Claims>()
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    if allowed_roles.iter().any(|role| *role == claims.role) {
-        Ok(next.run(request).await)
-    } else {
-        Err(StatusCode::FORBIDDEN)
-    }
-}

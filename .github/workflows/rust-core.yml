@@ -1,0 +1,26 @@
+name: Rust Core
+
+on:
+  push:
+    branches: [main]
+    paths: ['services/core/**']
+  pull_request:
+    paths: ['services/core/**']
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Check
+        run: cargo check --locked
+      - name: Test
+        run: cargo test --locked
+      - name: Format
+        run: cargo fmt --check

@@ -5,12 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
-    pub sub: Uuid,
-    pub email: String,
-    pub role: String,
-    pub exp: usize,
-}
+pub struct Claims { pub sub: Uuid, pub email: String, pub role: String, pub exp: usize }
 
 pub async fn require_auth<B>(State(secret): State<String>, mut request: Request<B>, next: Next) -> Result<Response, StatusCode> {
     let header = request.headers().get("authorization").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
@@ -23,6 +18,12 @@ pub async fn require_auth<B>(State(secret): State<String>, mut request: Request<
 }
 
 pub async fn check_user(pool: &PgPool, user_id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT 1 FROM users WHERE id = $1 AND status = 'ACTIVE'")
-        .bind(user_id).fetch_optional(pool).await?.ok_or(sqlx::Error::RowNotFound).map(|_| ())
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 AND status = 'ACTIVE'").bind(user_id).fetch_optional(pool).await?.ok_or(sqlx::Error::RowNotFound).map(|_| ())
+}
+
+pub fn require_role<B>(allowed: &'static [&'static str]) -> impl Fn(Request<B>, Next) -> _ + Clone {
+    move |request: Request<B>, next: Next| async move {
+        let claims = request.extensions().get::<Claims>().ok_or(StatusCode::UNAUTHORIZED)?;
+        if allowed.iter().any(|role| *role == claims.role) { Ok(next.run(request).await) } else { Err(StatusCode::FORBIDDEN) }
+    }
 }

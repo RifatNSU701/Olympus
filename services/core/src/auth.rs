@@ -1,5 +1,11 @@
-use axum::{body::Body, extract::State, http::{Request, StatusCode}, middleware::Next, response::Response};
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use axum::{
+    body::Body,
+    extract::State,
+    http::{Request, StatusCode},
+    middleware::Next,
+    response::Response,
+};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,7 +29,9 @@ pub async fn require_auth(
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let token = header.strip_prefix("Bearer ").ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
     let data = decode::<Claims>(

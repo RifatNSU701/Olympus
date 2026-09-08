@@ -6,21 +6,49 @@ mod health;
 mod products;
 mod state;
 
-use axum::{extract::Extension, middleware, routing::{delete, get, post, put}, Json, Router};
+use axum::{
+    extract::Extension,
+    middleware,
+    routing::{get, post, put},
+    Json, Router,
+};
 use serde::Serialize;
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
+
 use crate::{auth::Claims, state::AppState};
 
-#[derive(Serialize)] struct Identity { id: Uuid, email: String, role: String }
-async fn me(Extension(claims): Extension<Claims>) -> Json<Identity> { Json(Identity { id: claims.sub, email: claims.email, role: claims.role }) }
+#[derive(Serialize)]
+struct Identity {
+    id: Uuid,
+    email: String,
+    role: String,
+}
+
+async fn me(Extension(claims): Extension<Claims>) -> Json<Identity> {
+    Json(Identity {
+        id: claims.sub,
+        email: claims.email,
+        role: claims.role,
+    })
+}
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "olympus_core=info,tower_http=info".into())).json().init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            std::env::var("RUST_LOG")
+                .unwrap_or_else(|_| "olympus_core=info,tower_http=info".into()),
+        )
+        .json()
+        .init();
+
     dotenvy::dotenv().ok();
-    let pool = db::connect().await.expect("PostgreSQL connection required");
+
+    let pool = db::connect()
+        .await
+        .expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
     let state = AppState { pool, jwt_secret };
 
@@ -29,8 +57,12 @@ async fn main() {
         .route("/api/v1/products", post(products::create))
         .route("/api/v1/cart", get(cart::get))
         .route("/api/v1/cart/items", post(cart::add))
-        .route("/api/v1/cart/items/{item_id}", put(cart::update).delete(cart::remove))
-        .layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
+        .route(
+            "/api/v1/cart/items/{item_id}",
+            put(cart::update).delete(cart::remove),
+        )
+        .layer(middleware::from_fn(auth::require_auth))
+        .layer(Extension(state.clone()));
 
     let app = Router::new()
         .route("/health", get(health::health))
@@ -42,9 +74,16 @@ async fn main() {
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
-    let port = std::env::var("PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(8080);
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
     tracing::info!(%addr, "Olympus core API listening");
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind API listener");
+
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind API listener");
     axum::serve(listener, app).await.expect("serve API");
 }

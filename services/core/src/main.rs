@@ -2,21 +2,18 @@ mod auth;
 mod auth_api;
 mod db;
 mod health;
+mod products;
 mod state;
 
-use axum::{extract::State, middleware, routing::{get, post}, Extension, Json, Router};
+use axum::{extract::Extension, middleware, routing::{get, post}, Json, Router};
 use serde::Serialize;
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 use crate::{auth::Claims, state::AppState};
 
-#[derive(Serialize)]
-struct Identity { id: Uuid, email: String, role: String }
-
-async fn me(Extension(claims): Extension<Claims>) -> Json<Identity> {
-    Json(Identity { id: claims.sub, email: claims.email, role: claims.role })
-}
+#[derive(Serialize)] struct Identity { id: Uuid, email: String, role: String }
+async fn me(Extension(claims): Extension<Claims>) -> Json<Identity> { Json(Identity { id: claims.sub, email: claims.email, role: claims.role }) }
 
 #[tokio::main]
 async fn main() {
@@ -28,12 +25,15 @@ async fn main() {
 
     let protected = Router::new()
         .route("/api/v1/auth/me", get(me))
+        .route("/api/v1/products", post(products::create))
         .layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
 
     let app = Router::new()
         .route("/health", get(health::health))
         .route("/api/v1/auth/register", post(auth_api::register))
         .route("/api/v1/auth/login", post(auth_api::login))
+        .route("/api/v1/products", get(products::list))
+        .route("/api/v1/products/{id}", get(products::get))
         .merge(protected)
         .with_state(state)
         .layer(TraceLayer::new_for_http());

@@ -1,7 +1,6 @@
 use axum::{extract::{Extension, Path, State}, http::StatusCode, Json};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use uuid::Uuid;
 use crate::{auth::Claims, state::AppState};
 
@@ -14,13 +13,13 @@ pub struct AddItemRequest { pub product_id: Uuid, pub quantity: i32 }
 #[derive(Deserialize)]
 pub struct UpdateItemRequest { pub quantity: i32 }
 
-async fn ensure_cart(pool: &PgPool, buyer_id: Uuid) -> Result<Uuid, StatusCode> {
+async fn ensure_cart(state: &AppState, buyer_id: Uuid) -> Result<Uuid, StatusCode> {
     sqlx::query_scalar("INSERT INTO carts (buyer_id) VALUES ($1) ON CONFLICT (buyer_id) DO UPDATE SET updated_at = now() RETURNING id")
-        .bind(buyer_id).fetch_one(pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        .bind(buyer_id).fetch_one(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 pub async fn get(State(state): State<AppState>, Extension(claims): Extension<Claims>) -> Result<Json<CartResponse>, StatusCode> {
-    let cart_id = ensure_cart(&state.pool, claims.sub).await?;
+    let cart_id = ensure_cart(&state, claims.sub).await?;
     let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Decimal, i32, i32)>("SELECT ci.id, p.id, p.name, p.price, p.stock, ci.quantity FROM cart_items ci JOIN products p ON p.id = ci.product_id WHERE ci.cart_id = $1 ORDER BY ci.id")
         .bind(cart_id).fetch_all(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut subtotal = Decimal::ZERO;
@@ -45,13 +44,13 @@ pub async fn add(State(state): State<AppState>, Extension(claims): Extension<Cla
 
 pub async fn update(State(state): State<AppState>, Extension(claims): Extension<Claims>, Path(item_id): Path<Uuid>, Json(req): Json<UpdateItemRequest>) -> Result<Json<CartResponse>, StatusCode> {
     if req.quantity <= 0 { return remove(State(state), Extension(claims), Path(item_id)).await; }
-    let result = sqlx::query("UPDATE cart_items ci SET quantity = $1 FROM carts c, products p WHERE ci.id = $2 AND ci.cart_id = c.id AND ci.product_id = p.id AND c.buyer_id = $3 AND p.status = 'ACTIVE' AND $1 <= p.stock")
+    let result = sqlx::query("UPDATE cart_items AS ci SET quantity = $1 FROM carts AS c, products AS p WHERE ci.id = $2 AND ci.cart_id = c.id AND ci.product_id = p.id AND c.buyer_id = $3 AND p.status = 'ACTIVE' AND $1 <= p.stock")
         .bind(req.quantity).bind(item_id).bind(claims.sub).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 { return Err(StatusCode::CONFLICT); }
     get(State(state), Extension(claims)).await
 }
 
 pub async fn remove(State(state): State<AppState>, Extension(claims): Extension<Claims>, Path(item_id): Path<Uuid>) -> Result<Json<CartResponse>, StatusCode> {
-    sqlx::query("DELETE FROM cart_items ci USING carts c WHERE ci.id = $1 AND ci.cart_id = c.id AND c.buyer_id = $2").bind(item_id).bind(claims.sub).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("DELETE FROM cart_items AS ci USING carts AS c WHERE ci.id = $1 AND ci.cart_id = c.id AND c.buyer_id = $2").bind(item_id).bind(claims.sub).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     get(State(state), Extension(claims)).await
 }

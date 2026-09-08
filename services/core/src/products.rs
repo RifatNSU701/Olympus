@@ -1,7 +1,7 @@
 use axum::{
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Extension, Json,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -125,10 +125,7 @@ pub async fn create(
     Extension(claims): Extension<Claims>,
     Json(req): Json<CreateProduct>,
 ) -> Result<(StatusCode, Json<Product>), StatusCode> {
-    if claims.role != "SELLER"
-        && claims.role != "ADMIN"
-        && claims.role != "SUPER_ADMIN"
-    {
+    if claims.role != "SELLER" && claims.role != "ADMIN" && claims.role != "SUPER_ADMIN" {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -143,14 +140,12 @@ pub async fn create(
     }
 
     let slug = req.slug.trim().to_lowercase();
-    if sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM products WHERE slug = $1 LIMIT 1",
-    )
-    .bind(&slug)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .is_some()
+    if sqlx::query_scalar::<_, Uuid>("SELECT id FROM products WHERE slug = $1 LIMIT 1")
+        .bind(&slug)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some()
     {
         return Err(StatusCode::CONFLICT);
     }

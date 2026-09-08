@@ -30,7 +30,7 @@ public class AuthService {
         user.setFullName(request.fullName().trim());
         user.setPhone(request.phone() == null ? null : request.phone().trim());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
-        user.setRole(request.role() == null ? Role.BUYER : request.role());
+        user.setRole(request.role() == Role.SELLER ? Role.SELLER : Role.BUYER);
         user.setStatus(UserStatus.ACTIVE);
         User saved = users.save(user);
         return response(saved);

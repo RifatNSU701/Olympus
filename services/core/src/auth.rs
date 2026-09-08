@@ -1,7 +1,6 @@
 use axum::{
-    body::Body,
-    extract::Extension,
-    http::{Request, StatusCode},
+    extract::{Request, State},
+    http::StatusCode,
     middleware::Next,
     response::Response,
 };
@@ -20,8 +19,8 @@ pub struct Claims {
 }
 
 pub async fn require_auth(
-    Extension(state): Extension<AppState>,
-    mut request: Request<Body>,
+    State(state): State<AppState>,
+    mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     let authorization = request

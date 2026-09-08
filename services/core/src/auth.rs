@@ -1,4 +1,10 @@
-use axum::{body::Body, extract::State, http::{Request, StatusCode}, middleware::Next, response::Response};
+use axum::{
+    body::Body,
+    extract::State,
+    http::{Request, StatusCode},
+    middleware::Next,
+    response::Response,
+};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,34 +24,44 @@ pub async fn require_auth(
     mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let header = request
+    let authorization = request
         .headers()
         .get("authorization")
-        .and_then(|v| v.to_str().ok())
+        .and_then(|value| value.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let token = header.strip_prefix("Bearer ").ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token = authorization
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
-    let data = decode::<Claims>(
+
+    let decoded = decode::<Claims>(
         token,
         &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
         &validation,
     )
     .map_err(|_| StatusCode::UNAUTHORIZED)?;
-    request.extensions_mut().insert(data.claims);
+
+    request.extensions_mut().insert(decoded.claims);
     Ok(next.run(request).await)
 }
 
-pub async fn check_user(state: &AppState, user_id: Uuid) -> Result<(), sqlx::Error> {
-    let user_exists = sqlx::query("SELECT 1 FROM users WHERE id = $1 AND status = 'ACTIVE'")
-        .bind(user_id)
-        .fetch_optional(&state.pool)
-        .await?
-        .is_some();
+pub async fn require_role(
+    State(_state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+    allowed_roles: &'static [&'static str],
+) -> Result<Response, StatusCode> {
+    let claims = request
+        .extensions()
+        .get::<Claims>()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    if user_exists {
-        Ok(())
+    if allowed_roles.iter().any(|role| *role == claims.role) {
+        Ok(next.run(request).await)
     } else {
-        Err(sqlx::Error::RowNotFound)
+        Err(StatusCode::FORBIDDEN)
     }
 }

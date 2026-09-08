@@ -1,11 +1,12 @@
 mod auth;
 mod auth_api;
+mod cart;
 mod db;
 mod health;
 mod products;
 mod state;
 
-use axum::{extract::Extension, middleware, routing::{get, post}, Json, Router};
+use axum::{extract::Extension, middleware, routing::{delete, get, post, put}, Json, Router};
 use serde::Serialize;
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
@@ -26,6 +27,9 @@ async fn main() {
     let protected = Router::new()
         .route("/api/v1/auth/me", get(me))
         .route("/api/v1/products", post(products::create))
+        .route("/api/v1/cart", get(cart::get))
+        .route("/api/v1/cart/items", post(cart::add))
+        .route("/api/v1/cart/items/{item_id}", put(cart::update).delete(cart::remove))
         .layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
 
     let app = Router::new()

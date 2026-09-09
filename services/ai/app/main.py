@@ -1,9 +1,12 @@
 from math import log1p
+from datetime import datetime
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Olympus AI", version="0.2.0")
+from .analytics import OrderItemEvent, build_product_metrics
+
+app = FastAPI(title="Olympus AI", version="0.3.0")
 
 class RecommendationRequest(BaseModel):
     product_ids: list[str] = Field(default_factory=list)
@@ -15,6 +18,20 @@ class Recommendation(BaseModel):
     product_id: str
     score: float
     reason: str
+
+class OrderItemInput(BaseModel):
+    product_id: str
+    quantity: int = Field(gt=0)
+    unit_price: float = Field(ge=0)
+    created_at: datetime
+
+class AnalyticsRequest(BaseModel):
+    order_items: list[OrderItemInput] = Field(default_factory=list)
+
+class ProductMetric(BaseModel):
+    product_id: str
+    units_sold: float
+    revenue: float
 
 def rank(request: RecommendationRequest) -> list[Recommendation]:
     if not request.product_ids:
@@ -39,3 +56,8 @@ def health() -> dict[str, str]:
 @app.post("/v1/recommendations", response_model=list[Recommendation])
 def recommendations(request: RecommendationRequest) -> list[Recommendation]:
     return rank(request)
+
+@app.post("/v1/analytics/product-metrics", response_model=list[ProductMetric])
+def product_metrics(request: AnalyticsRequest) -> list[ProductMetric]:
+    events = [OrderItemEvent(**item.model_dump()) for item in request.order_items]
+    return build_product_metrics(events)

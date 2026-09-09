@@ -1,10 +1,5 @@
-use axum::{
-    extract::Request,
-    http::StatusCode,
-    middleware::Next,
-    response::Response,
-};
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -16,10 +11,7 @@ pub struct Claims {
     pub exp: usize,
 }
 
-pub async fn require_auth(
-    mut request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+pub async fn require_auth(mut request: Request, next: Next) -> Result<Response, StatusCode> {
     let secret = request
         .extensions()
         .get::<String>()

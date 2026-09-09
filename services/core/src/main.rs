@@ -27,6 +27,8 @@ async fn main() {
     let protected = Router::new()
         .route("/api/v1/auth/me", get(auth_api::me))
         .route("/api/v1/products", post(products::create))
+        .route("/api/v1/products/{id}", put(products::update))
+        .route("/api/v1/products/{id}/stock", put(products::update_stock))
         .route("/api/v1/cart", get(cart::get))
         .route("/api/v1/cart/items", post(cart::add))
         .route("/api/v1/cart/items/{item_id}", put(cart::update).delete(cart::remove))

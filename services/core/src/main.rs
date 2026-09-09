@@ -5,6 +5,7 @@ mod db;
 mod health;
 mod order_api;
 mod orders;
+mod payments;
 mod products;
 mod state;
 
@@ -30,28 +31,20 @@ async fn main() {
         .init();
 
     dotenvy::dotenv().ok();
-
-    let pool = db::connect()
-        .await
-        .expect("PostgreSQL connection required");
+    let pool = db::connect().await.expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
-    let state = AppState {
-        pool,
-        jwt_secret: jwt_secret.clone(),
-    };
+    let state = AppState { pool, jwt_secret: jwt_secret.clone() };
 
     let protected = Router::new()
         .route("/api/v1/auth/me", get(auth_api::me))
         .route("/api/v1/products", post(products::create))
         .route("/api/v1/cart", get(cart::get))
         .route("/api/v1/cart/items", post(cart::add))
-        .route(
-            "/api/v1/cart/items/{item_id}",
-            put(cart::update).delete(cart::remove),
-        )
+        .route("/api/v1/cart/items/{item_id}", put(cart::update).delete(cart::remove))
         .route("/api/v1/checkout", post(orders::checkout))
         .route("/api/v1/orders", get(order_api::list))
         .route("/api/v1/orders/{id}", get(order_api::get))
+        .route("/api/v1/orders/{order_id}/payments", post(payments::create))
         .layer(Extension(jwt_secret))
         .route_layer(middleware::from_fn(auth::require_auth));
 
@@ -65,16 +58,9 @@ async fn main() {
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
-    let port = std::env::var("PORT")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(8080);
+    let port = std::env::var("PORT").ok().and_then(|value| value.parse().ok()).unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-
     tracing::info!(%addr, "Olympus core API listening");
-
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("bind API listener");
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind API listener");
     axum::serve(listener, app).await.expect("serve API");
 }

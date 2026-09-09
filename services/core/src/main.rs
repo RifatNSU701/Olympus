@@ -7,32 +7,15 @@ mod products;
 mod state;
 
 use axum::{
+    extract::Extension,
     middleware,
     routing::{get, post, put},
-    extract::Extension,
-    Json, Router,
+    Router,
 };
-use serde::Serialize;
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
-use uuid::Uuid;
 
-use crate::{auth::Claims, state::AppState};
-
-#[derive(Serialize)]
-struct Identity {
-    id: Uuid,
-    email: String,
-    role: String,
-}
-
-async fn me(Extension(claims): Extension<Claims>) -> Json<Identity> {
-    Json(Identity {
-        id: claims.sub,
-        email: claims.email,
-        role: claims.role,
-    })
-}
+use crate::state::AppState;
 
 #[tokio::main]
 async fn main() {
@@ -50,10 +33,13 @@ async fn main() {
         .await
         .expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
-    let state = AppState { pool, jwt_secret };
+    let state = AppState {
+        pool,
+        jwt_secret: jwt_secret.clone(),
+    };
 
     let protected = Router::new()
-        .route("/api/v1/auth/me", get(me))
+        .route("/api/v1/auth/me", get(auth_api::me))
         .route("/api/v1/products", post(products::create))
         .route("/api/v1/cart", get(cart::get))
         .route("/api/v1/cart/items", post(cart::add))
@@ -61,10 +47,8 @@ async fn main() {
             "/api/v1/cart/items/{item_id}",
             put(cart::update).delete(cart::remove),
         )
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::require_auth,
-        ));
+        .layer(Extension(jwt_secret))
+        .route_layer(middleware::from_fn(auth::require_auth));
 
     let app = Router::new()
         .route("/health", get(health::health))

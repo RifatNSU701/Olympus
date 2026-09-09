@@ -5,31 +5,19 @@ mod db;
 mod health;
 mod order_api;
 mod orders;
+mod payment_api;
 mod payments;
 mod products;
 mod state;
 
-use axum::{
-    extract::Extension,
-    middleware,
-    routing::{get, post, put},
-    Router,
-};
+use axum::{extract::Extension, middleware, routing::{get, post, put}, Router};
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
-
 use crate::state::AppState;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            std::env::var("RUST_LOG")
-                .unwrap_or_else(|_| "olympus_core=info,tower_http=info".into()),
-        )
-        .json()
-        .init();
-
+    tracing_subscriber::fmt().with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "olympus_core=info,tower_http=info".into())).json().init();
     dotenvy::dotenv().ok();
     let pool = db::connect().await.expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
@@ -45,6 +33,7 @@ async fn main() {
         .route("/api/v1/orders", get(order_api::list))
         .route("/api/v1/orders/{id}", get(order_api::get))
         .route("/api/v1/orders/{order_id}/payments", post(payments::create))
+        .route("/api/v1/payments/{payment_id}/verify", post(payment_api::verify))
         .layer(Extension(jwt_secret))
         .route_layer(middleware::from_fn(auth::require_auth));
 

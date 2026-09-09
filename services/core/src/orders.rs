@@ -1,7 +1,6 @@
 use axum::{extract::{Extension, State}, http::StatusCode, Json};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 use crate::{auth::Claims, state::AppState};
 

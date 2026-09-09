@@ -1,3 +1,6 @@
+mod admin;
+mod ai_api;
+mod ai_client;
 mod auth;
 mod auth_api;
 mod cart;
@@ -10,7 +13,6 @@ mod payments;
 mod products;
 mod seller_dashboard;
 mod seller_orders;
-mod admin;
 mod state;
 
 use axum::{extract::Extension, middleware, routing::{get, post, put}, Router};
@@ -24,7 +26,8 @@ async fn main() {
     dotenvy::dotenv().ok();
     let pool = db::connect().await.expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
-    let state = AppState { pool, jwt_secret: jwt_secret.clone() };
+    let ai_url = std::env::var("OLYMPUS_AI_URL").unwrap_or_else(|_| "http://localhost:8000".into());
+    let state = AppState { pool, jwt_secret: jwt_secret.clone(), ai: ai_client::AiClient::new(ai_url) };
 
     let protected = Router::new()
         .route("/api/v1/auth/me", get(auth_api::me))
@@ -55,6 +58,7 @@ async fn main() {
         .route("/api/v1/auth/login", post(auth_api::login))
         .route("/api/v1/products", get(products::list))
         .route("/api/v1/products/{id}", get(products::get))
+        .route("/api/v1/recommendations", post(ai_api::recommend))
         .merge(protected)
         .with_state(state)
         .layer(TraceLayer::new_for_http());

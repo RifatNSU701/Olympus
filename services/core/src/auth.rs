@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Request, State},
+    extract::Request,
     http::StatusCode,
     middleware::Next,
     response::Response,
@@ -7,8 +7,6 @@ use axum::{
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::state::AppState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
@@ -19,10 +17,14 @@ pub struct Claims {
 }
 
 pub async fn require_auth(
-    State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    let secret = request
+        .extensions()
+        .get::<String>()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let authorization = request
         .headers()
         .get("authorization")
@@ -38,7 +40,7 @@ pub async fn require_auth(
 
     let decoded = decode::<Claims>(
         token,
-        &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
+        &DecodingKey::from_secret(secret.as_bytes()),
         &validation,
     )
     .map_err(|_| StatusCode::UNAUTHORIZED)?;

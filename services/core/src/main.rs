@@ -7,10 +7,10 @@ mod products;
 mod state;
 
 use axum::{
+    Router,
     extract::Extension,
     middleware,
     routing::{get, post, put},
-    Router,
 };
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
@@ -29,9 +29,7 @@ async fn main() {
 
     dotenvy::dotenv().ok();
 
-    let pool = db::connect()
-        .await
-        .expect("PostgreSQL connection required");
+    let pool = db::connect().await.expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
     let state = AppState {
         pool,

@@ -3,14 +3,15 @@ mod auth_api;
 mod cart;
 mod db;
 mod health;
+mod orders;
 mod products;
 mod state;
 
 use axum::{
-    Router,
     extract::Extension,
     middleware,
     routing::{get, post, put},
+    Router,
 };
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
@@ -29,7 +30,9 @@ async fn main() {
 
     dotenvy::dotenv().ok();
 
-    let pool = db::connect().await.expect("PostgreSQL connection required");
+    let pool = db::connect()
+        .await
+        .expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
     let state = AppState {
         pool,
@@ -45,6 +48,7 @@ async fn main() {
             "/api/v1/cart/items/{item_id}",
             put(cart::update).delete(cart::remove),
         )
+        .route("/api/v1/checkout", post(orders::checkout))
         .layer(Extension(jwt_secret))
         .route_layer(middleware::from_fn(auth::require_auth));
 

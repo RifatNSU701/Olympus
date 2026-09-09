@@ -140,16 +140,13 @@ pub async fn create(
     }
 
     let slug = req.slug.trim().to_lowercase();
-    let slug_exists = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM products WHERE slug = $1 LIMIT 1",
-    )
-    .bind(&slug)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .is_some();
-
-    if slug_exists {
+    if sqlx::query_scalar::<_, Uuid>("SELECT id FROM products WHERE slug = $1 LIMIT 1")
+        .bind(&slug)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some()
+    {
         return Err(StatusCode::CONFLICT);
     }
 

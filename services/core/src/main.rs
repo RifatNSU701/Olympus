@@ -10,6 +10,7 @@ mod payments;
 mod products;
 mod seller_dashboard;
 mod seller_orders;
+mod admin;
 mod state;
 
 use axum::{extract::Extension, middleware, routing::{get, post, put}, Router};
@@ -42,6 +43,9 @@ async fn main() {
         .route("/api/v1/seller/orders", get(seller_orders::list))
         .route("/api/v1/seller/orders/{id}", get(seller_orders::get))
         .route("/api/v1/seller/orders/{id}/status", put(seller_orders::update_status))
+        .route("/api/v1/admin/stats", get(admin::stats))
+        .route("/api/v1/admin/users", get(admin::list_users))
+        .route("/api/v1/admin/users/{id}/status", put(admin::update_user_status))
         .layer(Extension(jwt_secret))
         .route_layer(middleware::from_fn(auth::require_auth));
 

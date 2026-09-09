@@ -3,6 +3,7 @@ mod auth_api;
 mod cart;
 mod db;
 mod health;
+mod order_api;
 mod orders;
 mod products;
 mod state;
@@ -49,6 +50,8 @@ async fn main() {
             put(cart::update).delete(cart::remove),
         )
         .route("/api/v1/checkout", post(orders::checkout))
+        .route("/api/v1/orders", get(order_api::list))
+        .route("/api/v1/orders/{id}", get(order_api::get))
         .layer(Extension(jwt_secret))
         .route_layer(middleware::from_fn(auth::require_auth));
 

@@ -2,11 +2,88 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, CreditCard, ShieldCheck } from 'lucide-react';
 import './checkout.css';
 
-const API=import.meta.env.VITE_API_URL??'http://localhost:8080';
-export function Checkout({onBack,onComplete}:{onBack:()=>void;onComplete:(id:string)=>void}){
- const token=localStorage.getItem('olympus_token');const [cart,setCart]=useState<any>(null);const [address,setAddress]=useState('');const [busy,setBusy]=useState(false);const [error,setError]=useState('');
- useEffect(()=>{if(token)fetch(`${API}/api/v1/cart`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json()).then(setCart).catch(()=>setError('Unable to load cart.'))},[token]);
- async function place(){if(!token||!address.trim()){setError('Please provide a delivery address.');return}setBusy(true);setError('');try{const r=await fetch(`${API}/api/v1/checkout`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({shipping_address:address.trim()})});if(!r.ok)throw new Error('Checkout could not be completed.');const order=await r.json();onComplete(order.id)}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
- if(!token)return <div className="checkout-state">Please sign in before checkout.</div>;
- return <section className="checkout-page"><button className="back" onClick={onBack}><ArrowLeft size={17}/> Back to cart</button><div className="checkout-heading"><span className="eyebrow">SECURE CHECKOUT</span><h1>Complete your order.</h1></div><div className="checkout-grid"><div className="form-card"><h2>Delivery</h2><label>Shipping address<textarea value={address} onChange={e=>setAddress(e.target.value)} placeholder="Street, city, postal code" rows={5}/></label><div className="secure"><ShieldCheck size={19}/><span>Your order is protected by Olympus secure checkout.</span></div></div><aside className="summary"><span className="eyebrow">ORDER SUMMARY</span>{cart?.items?.map((i:any)=><div className="line" key={i.id}><span>{i.product_name} × {i.quantity}</span><b>৳{Number(i.line_total).toLocaleString('en-BD')}</b></div>)}<hr/><div className="total"><span>Total</span><b>৳{Number(cart?.subtotal??0).toLocaleString('en-BD')}</b></div><button className="checkout" disabled={busy} onClick={place}><CreditCard size={17}/>{busy?'Placing order…':'Place order'} <ArrowRight size={17}/></button>{error&&<small className="message">{error}</small>}</aside></div></section>;
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
+const IDEMPOTENCY_STORAGE_KEY = 'olympus_checkout_idempotency_key';
+
+function getCheckoutIdempotencyKey() {
+  const existing = sessionStorage.getItem(IDEMPOTENCY_STORAGE_KEY);
+  if (existing) return existing;
+  const key = crypto.randomUUID();
+  sessionStorage.setItem(IDEMPOTENCY_STORAGE_KEY, key);
+  return key;
+}
+
+export function Checkout({ onBack, onComplete }: { onBack: () => void; onComplete: (id: string) => void }) {
+  const token = localStorage.getItem('olympus_token');
+  const [cart, setCart] = useState<any>(null);
+  const [address, setAddress] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (token) {
+      fetch(`${API}/api/v1/cart`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then(setCart)
+        .catch(() => setError('Unable to load cart.'));
+    }
+  }, [token]);
+
+  async function place() {
+    if (!token || !address.trim()) {
+      setError('Please provide a delivery address.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      const r = await fetch(`${API}/api/v1/checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          idempotency_key: getCheckoutIdempotencyKey(),
+          shipping_address: address.trim(),
+          shipping_amount: 0,
+          tax_amount: 0,
+        }),
+      });
+
+      if (!r.ok) throw new Error('Checkout could not be completed.');
+      const order = await r.json();
+      sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
+      onComplete(order.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!token) return <div className="checkout-state">Please sign in before checkout.</div>;
+
+  return (
+    <section className="checkout-page">
+      <button className="back" onClick={onBack}><ArrowLeft size={17} /> Back to cart</button>
+      <div className="checkout-heading"><span className="eyebrow">SECURE CHECKOUT</span><h1>Complete your order.</h1></div>
+      <div className="checkout-grid">
+        <div className="form-card">
+          <h2>Delivery</h2>
+          <label>Shipping address<textarea value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, city, postal code" rows={5} maxLength={500} /></label>
+          <div className="secure"><ShieldCheck size={19} /><span>Your order is protected by Olympus secure checkout.</span></div>
+        </div>
+        <aside className="summary">
+          <span className="eyebrow">ORDER SUMMARY</span>
+          {cart?.items?.map((i: any) => <div className="line" key={i.id}><span>{i.product_name} × {i.quantity}</span><b>৳{Number(i.line_total).toLocaleString('en-BD')}</b></div>)}
+          <hr />
+          <div className="total"><span>Total</span><b>৳{Number(cart?.subtotal ?? 0).toLocaleString('en-BD')}</b></div>
+          <button className="checkout" disabled={busy} onClick={place}><CreditCard size={17} />{busy ? 'Placing order…' : 'Place order'} <ArrowRight size={17} /></button>
+          {error && <small className="message">{error}</small>}
+        </aside>
+      </div>
+    </section>
+  );
 }

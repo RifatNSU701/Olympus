@@ -37,6 +37,7 @@ services:
       DATABASE_URL: postgres://olympus:${POSTGRES_PASSWORD:-olympus-dev}@db:5432/olympus
       DATABASE_MAX_CONNECTIONS: ${DATABASE_MAX_CONNECTIONS:-20}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?PAYMENT_WEBHOOK_SECRET must be set}
       OLYMPUS_AI_URL: http://ai:8000
       PORT: 8080
       RUST_LOG: ${RUST_LOG:-olympus_core=info,tower_http=info}

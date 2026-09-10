@@ -12,6 +12,7 @@ mod payment_api;
 mod payments;
 mod products;
 mod security;
+mod seller_analytics;
 mod seller_dashboard;
 mod seller_orders;
 mod state;
@@ -44,6 +45,7 @@ async fn main() {
         .route("/api/v1/orders/{order_id}/payments", post(payments::create))
         .route("/api/v1/payments/{payment_id}/verify", post(payment_api::verify))
         .route("/api/v1/seller/dashboard", get(seller_dashboard::dashboard))
+        .route("/api/v1/seller/analytics", get(seller_analytics::analytics))
         .route("/api/v1/seller/orders", get(seller_orders::list))
         .route("/api/v1/seller/orders/{id}", get(seller_orders::get))
         .route("/api/v1/seller/orders/{id}/status", put(seller_orders::update_status))

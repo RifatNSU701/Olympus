@@ -27,11 +27,16 @@ pub async fn verify(
     Path(payment_id): Path<Uuid>,
     Json(req): Json<VerifyPayment>,
 ) -> Result<Json<PaymentStatus>, StatusCode> {
-    if req.provider_reference.trim().is_empty() {
+    let reference = req.provider_reference.trim();
+    if reference.is_empty() || reference.len() > 160 {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut tx = state.pool.begin().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let payment = sqlx::query_as::<_, PaymentStatus>(
         "SELECT p.id,p.order_id,p.provider,p.status,p.amount,p.currency,p.provider_reference FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$1 AND o.buyer_id=$2 FOR UPDATE",
     )
@@ -43,7 +48,9 @@ pub async fn verify(
     .ok_or(StatusCode::NOT_FOUND)?;
 
     if payment.status == "PAID" {
-        tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tx.commit()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Ok(Json(payment));
     }
     if payment.status != "PENDING" {
@@ -55,19 +62,22 @@ pub async fn verify(
         "UPDATE payments SET status=$1, provider_reference=$2, paid_at=CASE WHEN $1='PAID' THEN NOW() ELSE paid_at END, updated_at=NOW() WHERE id=$3 RETURNING id,order_id,provider,status,amount,currency,provider_reference",
     )
     .bind(next_status)
-    .bind(req.provider_reference.trim())
+    .bind(reference)
     .bind(payment_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    sqlx::query("UPDATE orders SET status='PAID', updated_at=NOW() WHERE id=$1 AND $2='PAID'")
+    let order_status = if req.success { "PAID" } else { "PAYMENT_FAILED" };
+    sqlx::query("UPDATE orders SET status=$1, updated_at=NOW() WHERE id=$2")
+        .bind(order_status)
         .bind(payment.order_id)
-        .bind(next_status)
         .execute(&mut *tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(updated))
 }

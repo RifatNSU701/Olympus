@@ -11,6 +11,7 @@ mod orders;
 mod payment_api;
 mod payments;
 mod products;
+mod security;
 mod seller_dashboard;
 mod seller_orders;
 mod state;
@@ -61,7 +62,8 @@ async fn main() {
         .route("/api/v1/recommendations", post(ai_api::recommend))
         .merge(protected)
         .with_state(state)
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(security::security_headers));
 
     let port = std::env::var("PORT").ok().and_then(|value| value.parse().ok()).unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

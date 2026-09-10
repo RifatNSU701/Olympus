@@ -18,7 +18,7 @@ mod state;
 
 use axum::{extract::Extension, middleware, routing::{get, post, put}, Router};
 use std::net::SocketAddr;
-use tower_http::trace::TraceLayer;
+use tower_http::{request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer}, trace::TraceLayer};
 use crate::state::AppState;
 
 #[tokio::main]
@@ -53,8 +53,11 @@ async fn main() {
         .layer(Extension(jwt_secret))
         .route_layer(middleware::from_fn(auth::require_auth));
 
+    let request_id = security::request_id_header();
     let app = Router::new()
         .route("/health", get(health::health))
+        .route("/health/live", get(health::live))
+        .route("/health/ready", get(health::ready))
         .route("/api/v1/auth/register", post(auth_api::register))
         .route("/api/v1/auth/login", post(auth_api::login))
         .route("/api/v1/products", get(products::list))
@@ -62,6 +65,8 @@ async fn main() {
         .route("/api/v1/recommendations", post(ai_api::recommend))
         .merge(protected)
         .with_state(state)
+        .layer(PropagateRequestIdLayer::new(request_id.clone()))
+        .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(security::security_headers));
 

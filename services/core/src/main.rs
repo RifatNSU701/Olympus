@@ -46,8 +46,7 @@ async fn main() {
 
     let pool = db::connect().await.expect("PostgreSQL connection required");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is required");
-    let ai_url =
-        std::env::var("OLYMPUS_AI_URL").unwrap_or_else(|_| "http://localhost:8000".into());
+    let ai_url = std::env::var("OLYMPUS_AI_URL").unwrap_or_else(|_| "http://localhost:8000".into());
     let state = AppState {
         pool,
         jwt_secret: jwt_secret.clone(),
@@ -79,41 +78,23 @@ async fn main() {
         .route("/api/v1/auth/me", get(auth_api::me))
         .route("/api/v1/products", post(products::create))
         .route("/api/v1/products/{id}", put(products::update))
-        .route(
-            "/api/v1/products/{id}/stock",
-            put(products::update_stock),
-        )
+        .route("/api/v1/products/{id}/stock", put(products::update_stock))
         .route("/api/v1/cart", get(cart::get))
         .route("/api/v1/cart/items", post(cart::add))
-        .route(
-            "/api/v1/cart/items/{item_id}",
-            put(cart::update).delete(cart::remove),
-        )
+        .route("/api/v1/cart/items/{item_id}", put(cart::update).delete(cart::remove))
         .route("/api/v1/checkout", post(orders::checkout))
         .route("/api/v1/orders", get(order_api::list))
         .route("/api/v1/orders/{id}", get(order_api::get))
-        .route(
-            "/api/v1/orders/{order_id}/payments",
-            post(payments::create),
-        )
-        .route(
-            "/api/v1/payments/{payment_id}/verify",
-            post(payment_api::verify),
-        )
+        .route("/api/v1/orders/{order_id}/payments", post(payments::create))
+        .route("/api/v1/payments/{payment_id}/verify", post(payment_api::verify))
         .route("/api/v1/seller/dashboard", get(seller_dashboard::dashboard))
         .route("/api/v1/seller/analytics", get(seller_analytics::analytics))
         .route("/api/v1/seller/orders", get(seller_orders::list))
         .route("/api/v1/seller/orders/{id}", get(seller_orders::get))
-        .route(
-            "/api/v1/seller/orders/{id}/status",
-            put(seller_orders::update_status),
-        )
+        .route("/api/v1/seller/orders/{id}/status", put(seller_orders::update_status))
         .route("/api/v1/admin/stats", get(admin::stats))
         .route("/api/v1/admin/users", get(admin::list_users))
-        .route(
-            "/api/v1/admin/users/{id}/status",
-            put(admin::update_user_status),
-        )
+        .route("/api/v1/admin/users/{id}/status", put(admin::update_user_status))
         .layer(Extension(jwt_secret))
         .route_layer(middleware::from_fn(auth::require_auth));
 
@@ -127,6 +108,7 @@ async fn main() {
         .route("/api/v1/products", get(products::list))
         .route("/api/v1/products/{id}", get(products::get))
         .route("/api/v1/recommendations", post(ai_api::recommend))
+        .route("/api/v1/payments/webhook", post(payment_api::webhook))
         .merge(protected)
         .with_state(state)
         .layer(cors)

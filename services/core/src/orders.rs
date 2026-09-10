@@ -12,6 +12,7 @@ use crate::{auth::Claims, state::AppState};
 #[derive(Deserialize)]
 pub struct CheckoutRequest {
     pub idempotency_key: String,
+    pub shipping_address: String,
     pub shipping_amount: Option<Decimal>,
     pub tax_amount: Option<Decimal>,
 }
@@ -25,6 +26,7 @@ pub struct OrderResponse {
     pub shipping_amount: Decimal,
     pub tax_amount: Decimal,
     pub total_amount: Decimal,
+    pub shipping_address: String,
 }
 
 pub async fn checkout(
@@ -33,7 +35,12 @@ pub async fn checkout(
     Json(req): Json<CheckoutRequest>,
 ) -> Result<(StatusCode, Json<OrderResponse>), StatusCode> {
     let idempotency_key = req.idempotency_key.trim();
-    if idempotency_key.is_empty() || idempotency_key.len() > 120 {
+    let shipping_address = req.shipping_address.trim();
+    if idempotency_key.is_empty()
+        || idempotency_key.len() > 120
+        || shipping_address.is_empty()
+        || shipping_address.len() > 500
+    {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -49,8 +56,8 @@ pub async fn checkout(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if let Some(existing) = sqlx::query_as::<_, (Uuid, String, String, Decimal, Decimal, Decimal, Decimal)>(
-        "SELECT id,status,currency,subtotal,shipping_amount,tax_amount,total_amount FROM orders WHERE buyer_id=$1 AND idempotency_key=$2",
+    if let Some(existing) = sqlx::query_as::<_, (Uuid, String, String, Decimal, Decimal, Decimal, Decimal, String)>(
+        "SELECT id,status,currency,subtotal,shipping_amount,tax_amount,total_amount,shipping_address FROM orders WHERE buyer_id=$1 AND idempotency_key=$2",
     )
     .bind(claims.sub)
     .bind(idempotency_key)
@@ -68,6 +75,7 @@ pub async fn checkout(
                 shipping_amount: existing.4,
                 tax_amount: existing.5,
                 total_amount: existing.6,
+                shipping_address: existing.7,
             }),
         ));
     }
@@ -99,8 +107,8 @@ pub async fn checkout(
     }
     let total = subtotal + shipping + tax;
 
-    let order = sqlx::query_as::<_, (Uuid, String, String, Decimal, Decimal, Decimal, Decimal)>(
-        "INSERT INTO orders (buyer_id,status,currency,subtotal,shipping_amount,tax_amount,total_amount,idempotency_key) VALUES ($1,'PENDING_PAYMENT','BDT',$2,$3,$4,$5,$6) RETURNING id,status,currency,subtotal,shipping_amount,tax_amount,total_amount",
+    let order = sqlx::query_as::<_, (Uuid, String, String, Decimal, Decimal, Decimal, Decimal, String)>(
+        "INSERT INTO orders (buyer_id,status,currency,subtotal,shipping_amount,tax_amount,total_amount,idempotency_key,shipping_address) VALUES ($1,'PENDING_PAYMENT','BDT',$2,$3,$4,$5,$6,$7) RETURNING id,status,currency,subtotal,shipping_amount,tax_amount,total_amount,shipping_address",
     )
     .bind(claims.sub)
     .bind(subtotal)
@@ -108,6 +116,7 @@ pub async fn checkout(
     .bind(tax)
     .bind(total)
     .bind(idempotency_key)
+    .bind(shipping_address)
     .fetch_one(&mut *tx)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -151,6 +160,7 @@ pub async fn checkout(
             shipping_amount: order.4,
             tax_amount: order.5,
             total_amount: order.6,
+            shipping_address: order.7,
         }),
     ))
 }

@@ -1,4 +1,4 @@
-use crate::{auth::Claims, auth_validation, state::AppState};
+use crate::{auth::{Claims, JWT_AUDIENCE, JWT_ISSUER}, auth_validation, state::AppState};
 use argon2::{password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString}, Argon2};
 use axum::{extract::{Extension, State}, http::StatusCode, Json};
 use jsonwebtoken::{encode, EncodingKey, Header};
@@ -7,150 +7,52 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
-pub struct RegisterRequest {
-    pub email: String,
-    pub password: String,
-    pub full_name: String,
-}
-
+pub struct RegisterRequest { pub email: String, pub password: String, pub full_name: String }
 #[derive(Deserialize)]
-pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
-}
-
+pub struct LoginRequest { pub email: String, pub password: String }
 #[derive(Serialize)]
-pub struct TokenResponse {
-    pub access_token: String,
-    pub token_type: &'static str,
-}
-
+pub struct TokenResponse { pub access_token: String, pub token_type: &'static str }
 #[derive(Serialize)]
-pub struct MeResponse {
-    pub id: Uuid,
-    pub email: String,
-    pub role: String,
-    pub status: String,
-    pub full_name: String,
-}
+pub struct MeResponse { pub id: Uuid, pub email: String, pub role: String, pub status: String, pub full_name: String }
 
 fn token(claims: Claims, secret: &str) -> Result<String, StatusCode> {
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub async fn register(
-    State(state): State<AppState>,
-    Json(req): Json<RegisterRequest>,
-) -> Result<(StatusCode, Json<TokenResponse>), StatusCode> {
+pub async fn register(State(state): State<AppState>, Json(req): Json<RegisterRequest>) -> Result<(StatusCode, Json<TokenResponse>), StatusCode> {
     let email = auth_validation::normalize_email(&req.email).ok_or(StatusCode::BAD_REQUEST)?;
     let name = req.full_name.trim();
-    if !auth_validation::valid_registration(&req.password, name) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
+    if !auth_validation::valid_registration(&req.password, name) { return Err(StatusCode::BAD_REQUEST); }
     let salt = SaltString::generate(&mut OsRng);
-    let hash = Argon2::default()
-        .hash_password(req.password.as_bytes(), &salt)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .to_string();
-
-    let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO users (email, password_hash, full_name, role, status) VALUES ($1, $2, $3, 'BUYER', 'ACTIVE') RETURNING id",
-    )
-    .bind(&email)
-    .bind(hash)
-    .bind(name)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|error| {
-        if error.as_database_error().and_then(|db| db.constraint()) == Some("users_email_lower_uidx") {
-            StatusCode::CONFLICT
-        } else if error.as_database_error().and_then(|db| db.constraint()) == Some("users_email_key") {
-            StatusCode::CONFLICT
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    })?;
-
-    let claims = Claims {
-        sub: id,
-        email,
-        role: "BUYER".into(),
-        exp: (chrono::Utc::now().timestamp() + 3600) as usize,
-    };
-
-    Ok((
-        StatusCode::CREATED,
-        Json(TokenResponse {
-            access_token: token(claims, &state.jwt_secret)?,
-            token_type: "Bearer",
-        }),
-    ))
+    let hash = Argon2::default().hash_password(req.password.as_bytes(), &salt).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.to_string();
+    let id: Uuid = sqlx::query_scalar("INSERT INTO users (email, password_hash, full_name, role, status) VALUES ($1, $2, $3, 'BUYER', 'ACTIVE') RETURNING id")
+        .bind(&email).bind(hash).bind(name).fetch_one(&state.pool).await
+        .map_err(|error| {
+            match error.as_database_error().and_then(|db| db.constraint()) {
+                Some("users_email_lower_uidx") | Some("users_email_key") => StatusCode::CONFLICT,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        })?;
+    let claims = Claims { sub: id, email, role: "BUYER".into(), exp: (chrono::Utc::now().timestamp() + 3600) as usize, iss: JWT_ISSUER.into(), aud: JWT_AUDIENCE.into() };
+    Ok((StatusCode::CREATED, Json(TokenResponse { access_token: token(claims, &state.jwt_secret)?, token_type: "Bearer" })))
 }
 
-pub async fn login(
-    State(state): State<AppState>,
-    Json(req): Json<LoginRequest>,
-) -> Result<Json<TokenResponse>, StatusCode> {
+pub async fn login(State(state): State<AppState>, Json(req): Json<LoginRequest>) -> Result<Json<TokenResponse>, StatusCode> {
     let email = auth_validation::normalize_email(&req.email).ok_or(StatusCode::UNAUTHORIZED)?;
-    if !auth_validation::valid_login_password(&req.password) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    let row: Option<(Uuid, String, String, String)> = sqlx::query_as(
-        "SELECT id, password_hash, role, status FROM users WHERE lower(email) = $1 LIMIT 1",
-    )
-    .bind(&email)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
+    if !auth_validation::valid_login_password(&req.password) { return Err(StatusCode::UNAUTHORIZED); }
+    let row: Option<(Uuid, String, String, String)> = sqlx::query_as("SELECT id, password_hash, role, status FROM users WHERE lower(email) = $1 LIMIT 1")
+        .bind(&email).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let (id, hash, role, status) = row.ok_or(StatusCode::UNAUTHORIZED)?;
-    if status != "ACTIVE" {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
+    if status != "ACTIVE" { return Err(StatusCode::FORBIDDEN); }
     let parsed = PasswordHash::new(&hash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Argon2::default()
-        .verify_password(req.password.as_bytes(), &parsed)
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let claims = Claims {
-        sub: id,
-        email,
-        role,
-        exp: (chrono::Utc::now().timestamp() + 3600) as usize,
-    };
-
-    Ok(Json(TokenResponse {
-        access_token: token(claims, &state.jwt_secret)?,
-        token_type: "Bearer",
-    }))
+    Argon2::default().verify_password(req.password.as_bytes(), &parsed).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let claims = Claims { sub: id, email, role, exp: (chrono::Utc::now().timestamp() + 3600) as usize, iss: JWT_ISSUER.into(), aud: JWT_AUDIENCE.into() };
+    Ok(Json(TokenResponse { access_token: token(claims, &state.jwt_secret)?, token_type: "Bearer" }))
 }
 
-pub async fn me(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-) -> Result<Json<MeResponse>, StatusCode> {
-    let row = sqlx::query_as::<_, (Uuid, String, String, String, String)>(
-        "SELECT id, email, role, status, full_name FROM users WHERE id = $1",
-    )
-    .bind(claims.sub)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    Ok(Json(MeResponse {
-        id: row.0,
-        email: row.1,
-        role: row.2,
-        status: row.3,
-        full_name: row.4,
-    }))
+pub async fn me(State(state): State<AppState>, Extension(claims): Extension<Claims>) -> Result<Json<MeResponse>, StatusCode> {
+    let row = sqlx::query_as::<_, (Uuid, String, String, String, String)>("SELECT id, email, role, status, full_name FROM users WHERE id = $1")
+        .bind(claims.sub).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(Json(MeResponse { id: row.0, email: row.1, role: row.2, status: row.3, full_name: row.4 }))
 }

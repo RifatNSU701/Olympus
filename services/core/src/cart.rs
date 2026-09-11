@@ -1,8 +1,8 @@
 use crate::{auth::Claims, state::AppState};
 use axum::{
-    Json,
     extract::{Extension, Path, State},
     http::StatusCode,
+    Json,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -47,13 +47,10 @@ async fn ensure_cart(state: &AppState, buyer_id: Uuid) -> Result<Uuid, StatusCod
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub async fn get(
-    State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
-) -> Result<Json<CartResponse>, StatusCode> {
-    let cart_id = ensure_cart(&state, claims.sub).await?;
+async fn get_for_buyer(state: &AppState, buyer_id: Uuid) -> Result<Json<CartResponse>, StatusCode> {
+    let cart_id = ensure_cart(state, buyer_id).await?;
     let rows = sqlx::query_as::<_, (Uuid, Uuid, String, Decimal, i32, i32)>(
-        "SELECT ci.id, p.id, p.name, p.price, p.stock, ci.quantity FROM cart_items ci JOIN products p ON p.id = ci.product_id WHERE ci.cart_id = $1 ORDER BY ci.id",
+        "SELECT ci.id, p.id, p.name, p.price, p.stock, ci.quantity FROM cart_items ci JOIN products p ON p.id = ci.product_id WHERE ci.cart_id = $1 AND p.status = 'ACTIVE' ORDER BY ci.id",
     )
     .bind(cart_id)
     .fetch_all(&state.pool)
@@ -83,6 +80,13 @@ pub async fn get(
         items,
         subtotal,
     }))
+}
+
+pub async fn get(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+) -> Result<Json<CartResponse>, StatusCode> {
+    get_for_buyer(&state, claims.sub).await
 }
 
 pub async fn add(
@@ -142,7 +146,7 @@ pub async fn add(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    get(State(state), Extension(claims)).await
+    get_for_buyer(&state, claims.sub).await
 }
 
 pub async fn update(
@@ -167,7 +171,7 @@ pub async fn update(
         return Err(StatusCode::CONFLICT);
     }
 
-    get(State(state), Extension(claims)).await
+    get_for_buyer(&state, claims.sub).await
 }
 
 pub async fn remove(
@@ -181,5 +185,5 @@ pub async fn remove(
         .execute(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    get(State(state), Extension(claims)).await
+    get_for_buyer(&state, claims.sub).await
 }

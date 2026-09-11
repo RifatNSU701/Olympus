@@ -27,6 +27,7 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
+use axum_governor::{extractor::PeerIp, GovernorConfigBuilder, GovernorLayer, Quota};
 use std::net::SocketAddr;
 use tower_http::{
     cors::CorsLayer,
@@ -113,6 +114,13 @@ async fn main() {
         .route_layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
 
     let request_id = security::request_id_header();
+    let rate_limit = GovernorConfigBuilder::default()
+        .with_extractor(PeerIp::default())
+        .expect_connect_info()
+        .quota_default(Quota::requests_per_second(50u32.try_into().unwrap()))
+        .finish()
+        .expect("valid rate-limit configuration");
+
     let app = Router::new()
         .route("/health", get(health::health))
         .route("/health/live", get(health::live))
@@ -126,6 +134,7 @@ async fn main() {
         .merge(protected)
         .with_state(state)
         .layer(DefaultBodyLimit::max(1_048_576))
+        .layer(GovernorLayer::new(rate_limit))
         .layer(cors)
         .layer(PropagateRequestIdLayer::new(request_id.clone()))
         .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))
@@ -141,5 +150,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind API listener");
-    axum::serve(listener, app).await.expect("serve API");
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .expect("serve API");
 }

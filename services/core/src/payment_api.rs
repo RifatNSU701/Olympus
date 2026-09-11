@@ -38,6 +38,29 @@ pub struct PaymentWebhook {
     pub amount: rust_decimal::Decimal,
 }
 
+pub fn normalize_webhook_status(status: &str) -> Option<&'static str> {
+    match status.trim().to_uppercase().as_str() {
+        "PAID" => Some("PAID"),
+        "FAILED" => Some("FAILED"),
+        _ => None,
+    }
+}
+
+pub fn verify_webhook_signature(secret: &[u8], payload: &[u8], signature: &str) -> bool {
+    let provided = signature.strip_prefix("sha256=").unwrap_or(signature);
+    if provided.len() != 64 || !provided.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return false;
+    }
+    let Ok(provided_bytes) = hex::decode(provided) else {
+        return false;
+    };
+    let Ok(mut mac) = HmacSha256::new_from_slice(secret) else {
+        return false;
+    };
+    mac.update(payload);
+    mac.verify_slice(&provided_bytes).is_ok()
+}
+
 pub async fn verify(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -106,25 +129,12 @@ pub async fn webhook(
     if reference.is_empty() || reference.len() > 160 || req.amount.is_sign_negative() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let status = req.status.trim().to_uppercase();
-    if !matches!(status.as_str(), "PAID" | "FAILED") {
+    let Some(status) = normalize_webhook_status(&req.status) else {
         return Err(StatusCode::BAD_REQUEST);
-    }
+    };
 
     let canonical = serde_json::to_string(&req).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    mac.update(canonical.as_bytes());
-    let provided = signature.strip_prefix("sha256=").unwrap_or(signature);
-    let expected = hex::encode(mac.finalize().into_bytes());
-    if provided.len() != expected.len()
-        || !provided
-            .as_bytes()
-            .iter()
-            .zip(expected.as_bytes())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            .eq(&0)
-    {
+    if !verify_webhook_signature(secret.as_bytes(), canonical.as_bytes(), signature) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -152,7 +162,7 @@ pub async fn webhook(
     let updated = sqlx::query_as::<_, PaymentStatus>(
         "UPDATE payments SET status=$1,provider_reference=$2,paid_at=CASE WHEN $1='PAID' THEN NOW() ELSE paid_at END,updated_at=NOW() WHERE id=$3 RETURNING id,order_id,provider,status,amount,currency,provider_reference",
     )
-    .bind(&status)
+    .bind(status)
     .bind(reference)
     .bind(req.payment_id)
     .fetch_one(&mut *tx)
@@ -168,4 +178,38 @@ pub async fn webhook(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(updated))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_webhook_status, verify_webhook_signature};
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    #[test]
+    fn webhook_status_is_normalized_and_restricted() {
+        assert_eq!(normalize_webhook_status(" paid "), Some("PAID"));
+        assert_eq!(normalize_webhook_status("FAILED"), Some("FAILED"));
+        assert_eq!(normalize_webhook_status("PENDING"), None);
+    }
+
+    #[test]
+    fn webhook_signature_accepts_valid_signature() {
+        let secret = b"test-secret";
+        let payload = br#"{"payment_id":"123","status":"PAID"}"#;
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
+        mac.update(payload);
+        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+        assert!(verify_webhook_signature(secret, payload, &signature));
+        assert!(verify_webhook_signature(secret, payload, signature.trim_start_matches("sha256=")));
+    }
+
+    #[test]
+    fn webhook_signature_rejects_tampering_and_malformed_values() {
+        let secret = b"test-secret";
+        let payload = b"payload";
+        assert!(!verify_webhook_signature(secret, b"tampered", "00"));
+        assert!(!verify_webhook_signature(secret, payload, "sha256=not-hex"));
+        assert!(!verify_webhook_signature(secret, payload, "sha256=00"));
+    }
 }

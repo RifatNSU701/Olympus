@@ -21,7 +21,6 @@ mod seller_orders;
 mod state;
 
 use axum::{
-    extract::Extension,
     http::{HeaderValue, Method},
     middleware,
     routing::{get, post, put},
@@ -52,7 +51,7 @@ async fn main() {
     let ai_url = std::env::var("OLYMPUS_AI_URL").unwrap_or_else(|_| "http://localhost:8000".into());
     let state = AppState {
         pool,
-        jwt_secret: jwt_secret.clone(),
+        jwt_secret,
         ai: ai_client::AiClient::new(ai_url),
     };
 
@@ -110,8 +109,7 @@ async fn main() {
         .route("/api/v1/admin/stats", get(admin::stats))
         .route("/api/v1/admin/users", get(admin::list_users))
         .route("/api/v1/admin/users/{id}/status", put(admin::update_user_status))
-        .layer(Extension(jwt_secret))
-        .route_layer(middleware::from_fn(auth::require_auth));
+        .route_layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
 
     let request_id = security::request_id_header();
     let app = Router::new()

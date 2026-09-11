@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
-use crate::{auth::Claims, state::AppState};
+use crate::{auth::Claims, audit, state::AppState};
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct Payment {
@@ -85,5 +85,20 @@ pub async fn create(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if let Err(error) = audit::record(
+        &state.pool,
+        Some(claims.sub),
+        audit::AuditEvent {
+            action: "PAYMENT_CREATED",
+            entity_type: "PAYMENT",
+            entity_id: Some(payment.id),
+        },
+    )
+    .await
+    {
+        tracing::warn!(payment_id = %payment.id, %error, "failed to record payment creation audit event");
+    }
+
     Ok((StatusCode::CREATED, Json(payment)))
 }

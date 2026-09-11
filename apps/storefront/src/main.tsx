@@ -15,43 +15,30 @@ type User = { id: string; email: string; role: string; status: string; full_name
 type CartItem = { id: string; product_id: string; product_name: string; unit_price: number; quantity: number; line_total: number };
 type Cart = { items: CartItem[]; subtotal: number };
 
-function CartDrawer({ open, onClose, onSignIn }: { open: boolean; onClose: () => void; onSignIn: () => void }) {
-  const [cart, setCart] = useState<Cart | null>(null);
-  const [message, setMessage] = useState('');
-  useEffect(() => {
-    if (!open) return;
-    const token = localStorage.getItem('olympus_token');
-    if (!token) { setCart(null); setMessage('Sign in to view your cart.'); return; }
-    setMessage('Loading cart…');
-    fetch(`${API}/api/v1/cart`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => { if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Your session is not active.' : 'Unable to load cart.'); return r.json(); })
-      .then(data => { setCart(data); setMessage(''); })
-      .catch(e => setMessage(e.message));
-  }, [open]);
-  if (!open) return null;
-  return <div className="drawer-backdrop" onClick={onClose}><aside className="cart-drawer" onClick={e => e.stopPropagation()}>
-    <header><div><span className="eyebrow">YOUR CART</span><h2>Ready to checkout.</h2></div><button className="drawer-close" aria-label="Close cart" onClick={onClose}>×</button></header>
-    {message && <p className="drawer-message">{message}{!cart && <><br/><button className="drawer-signin" onClick={() => { onClose(); onSignIn(); }}>Sign in or create an account</button></>}</p>}
-    {cart && cart.items.length === 0 && <p className="drawer-message">Your cart is empty. Explore the collection to add something.</p>}
-    {cart && cart.items.length > 0 && <><div className="cart-items">{cart.items.map(item => <div className="cart-item" key={item.id}><div><strong>{item.product_name}</strong><small>{item.quantity} × ৳{Number(item.unit_price).toLocaleString('en-BD')}</small></div><b>৳{Number(item.line_total).toLocaleString('en-BD')}</b></div>)}</div><div className="cart-total"><span>Subtotal</span><strong>৳{Number(cart.subtotal).toLocaleString('en-BD')}</strong></div><button className="checkout-button" onClick={() => setMessage('Checkout is ready for the authenticated account.')}>Continue to checkout <ArrowRight size={17}/></button></>}
-  </aside></div>;
+function Checkout({ cart, onBack, onDone }: { cart: Cart; onBack: () => void; onDone: () => void }) {
+  const [address, setAddress] = useState(''); const [shipping, setShipping] = useState(0); const [tax, setTax] = useState(0); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [order, setOrder] = useState<{id:string;total_amount:number;status:string}|null>(null);
+  const total = cart.subtotal + shipping + tax;
+  async function placeOrder() {
+    const token = localStorage.getItem('olympus_token'); if (!token) { setMessage('Please sign in again.'); return; }
+    if (address.trim().length < 10) { setMessage('Please provide a complete shipping address.'); return; }
+    setBusy(true); setMessage('');
+    try {
+      const response = await fetch(`${API}/api/v1/checkout`, { method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`}, body:JSON.stringify({idempotency_key:crypto.randomUUID(),shipping_address:address.trim(),shipping_amount:shipping,tax_amount:tax}) });
+      if (!response.ok) throw new Error(response.status === 409 ? 'Some items are no longer available at this quantity.' : response.status === 400 ? 'Your cart or shipping information is invalid.' : 'Unable to create the order.');
+      setOrder(await response.json());
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to create the order.'); } finally { setBusy(false); }
+  }
+  if (order) return <section className="checkout"><span className="eyebrow">ORDER CREATED</span><h1>Your order is ready.</h1><p className="checkout-copy">Order <strong>{order.id.slice(0,8).toUpperCase()}</strong> has been created and is awaiting payment.</p><div className="order-summary"><span>Total</span><strong>৳{Number(order.total_amount).toLocaleString('en-BD')}</strong></div><button className="checkout-button" onClick={onDone}>Return to marketplace <ArrowRight size={17}/></button></section>;
+  return <section className="checkout"><button className="back-link" onClick={onBack}>← Back to cart</button><span className="eyebrow">SECURE CHECKOUT</span><h1>Complete your order.</h1><div className="checkout-grid"><form onSubmit={e=>{e.preventDefault();placeOrder()}}><label>Shipping address<textarea value={address} onChange={e=>setAddress(e.target.value)} maxLength={500} rows={5} placeholder="House, road, area, city, postal code" required/></label><label>Shipping fee<input type="number" min="0" step="0.01" value={shipping} onChange={e=>setShipping(Math.max(0,Number(e.target.value)||0))}/></label><label>Tax<input type="number" min="0" step="0.01" value={tax} onChange={e=>setTax(Math.max(0,Number(e.target.value)||0))}/></label>{message&&<p className="auth-message">{message}</p>}<button className="checkout-button" disabled={busy}>{busy?'Creating order…':'Place order'} <ArrowRight size={17}/></button></form><aside className="checkout-card"><span className="eyebrow">SUMMARY</span>{cart.items.map(item=><div className="summary-line" key={item.id}><span>{item.product_name} × {item.quantity}</span><b>৳{Number(item.line_total).toLocaleString('en-BD')}</b></div>)}<div className="summary-line"><span>Shipping</span><b>৳{shipping.toLocaleString('en-BD')}</b></div><div className="summary-line"><span>Tax</span><b>৳{tax.toLocaleString('en-BD')}</b></div><div className="summary-total"><span>Total</span><strong>৳{total.toLocaleString('en-BD')}</strong></div></aside></div></section>;
 }
 
-function App() {
-  const [cartOpen, setCartOpen] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  useEffect(() => {
-    const token = localStorage.getItem('olympus_token');
-    if (!token) return;
-    fetch(`${API}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : Promise.reject()).then(setUser).catch(() => { localStorage.removeItem('olympus_token'); setUser(null); });
-  }, []);
-  function logout() { localStorage.removeItem('olympus_token'); setUser(null); }
-  return <div className="app">
-    <nav className="nav"><div className="brand">OLYMPUS<span>®</span></div><div className="navlinks"><a href="#shop">Shop</a><a href="#sellers">Sellers</a><a href="#about">About</a></div><div className="actions"><button className="icon" aria-label="Search"><Search size={19}/></button><button className="bag" aria-label="Open cart" onClick={() => setCartOpen(true)}><ShoppingBag size={19}/><b>Cart</b></button><AccountButton user={user} onClick={() => setAuthOpen(true)} onLogout={logout}/></div></nav>
-    <main><section className="hero"><div className="eyebrow">THE MODERN MARKETPLACE</div><h1>Commerce,<br/><em>elevated.</em></h1><p>Discover exceptional products from ambitious sellers, all in one beautifully simple marketplace.</p><div className="hero-actions"><a className="primary" href="#shop">Explore products <ArrowRight size={18}/></a><button className="secondary" onClick={() => user ? setCartOpen(true) : setAuthOpen(true)}>{user ? 'View your cart' : 'Sign in to shop'}</button></div><div className="orb orb-a"/><div className="orb orb-b"/></section><Catalog/><section className="features" id="about">{highlights.map(({icon: Icon,title,text}) => <article key={title}><Icon size={22}/><h3>{title}</h3><p>{text}</p></article>)}</section><section className="discover"><div><span className="eyebrow">DISCOVER OLYMPUS</span><h2>Built for people<br/>who expect more.</h2></div><button className="round" aria-label="Open cart" onClick={() => setCartOpen(true)}><ArrowRight/></button></section></main>
-    <footer><div className="brand">OLYMPUS<span>®</span></div><small>© 2026 Olympus Marketplace</small></footer>
-    <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} onSignIn={() => setAuthOpen(true)}/><AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} onAuthenticated={setUser}/>
-  </div>;
+function CartDrawer({ open, onClose, onSignIn, onCheckout }: { open:boolean; onClose:()=>void; onSignIn:()=>void; onCheckout:(cart:Cart)=>void }) {
+  const [cart,setCart]=useState<Cart|null>(null); const [message,setMessage]=useState('');
+  useEffect(()=>{if(!open)return;const token=localStorage.getItem('olympus_token');if(!token){setCart(null);setMessage('Sign in to view your cart.');return}setMessage('Loading cart…');fetch(`${API}/api/v1/cart`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>{if(!r.ok)throw new Error(r.status===401||r.status===403?'Your session is not active.':'Unable to load cart.');return r.json()}).then(data=>{setCart(data);setMessage('')}).catch(e=>setMessage(e.message))},[open]);
+  if(!open)return null; return <div className="drawer-backdrop" onClick={onClose}><aside className="cart-drawer" onClick={e=>e.stopPropagation()}><header><div><span className="eyebrow">YOUR CART</span><h2>Ready to checkout.</h2></div><button className="drawer-close" aria-label="Close cart" onClick={onClose}>×</button></header>{message&&<p className="drawer-message">{message}{!cart&&<><br/><button className="drawer-signin" onClick={()=>{onClose();onSignIn()}}>Sign in or create an account</button></>}</p>}{cart&&cart.items.length===0&&<p className="drawer-message">Your cart is empty. Explore the collection to add something.</p>}{cart&&cart.items.length>0&&<><div className="cart-items">{cart.items.map(item=><div className="cart-item" key={item.id}><div><strong>{item.product_name}</strong><small>{item.quantity} × ৳{Number(item.unit_price).toLocaleString('en-BD')}</small></div><b>৳{Number(item.line_total).toLocaleString('en-BD')}</b></div>)}</div><div className="cart-total"><span>Subtotal</span><strong>৳{Number(cart.subtotal).toLocaleString('en-BD')}</strong></div><button className="checkout-button" onClick={()=>{onClose();onCheckout(cart)}}>Continue to checkout <ArrowRight size={17}/></button></>}</aside></div>;
 }
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+
+function App(){const[cartOpen,setCartOpen]=useState(false);const[authOpen,setAuthOpen]=useState(false);const[checkout,setCheckout]=useState<Cart|null>(null);const[user,setUser]=useState<User|null>(null);useEffect(()=>{const token=localStorage.getItem('olympus_token');if(!token)return;fetch(`${API}/api/v1/auth/me`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.ok?r.json():Promise.reject()).then(setUser).catch(()=>{localStorage.removeItem('olympus_token');setUser(null)})},[]);function logout(){localStorage.removeItem('olympus_token');setUser(null)}
+if(checkout)return <div className="app"><Checkout cart={checkout} onBack={()=>setCheckout(null)} onDone={()=>setCheckout(null)}/></div>;
+return <div className="app"><nav className="nav"><div className="brand">OLYMPUS<span>®</span></div><div className="navlinks"><a href="#shop">Shop</a><a href="#sellers">Sellers</a><a href="#about">About</a></div><div className="actions"><button className="icon" aria-label="Search"><Search size={19}/></button><button className="bag" aria-label="Open cart" onClick={()=>setCartOpen(true)}><ShoppingBag size={19}/><b>Cart</b></button><AccountButton user={user} onClick={()=>setAuthOpen(true)} onLogout={logout}/></div></nav><main><section className="hero"><div className="eyebrow">THE MODERN MARKETPLACE</div><h1>Commerce,<br/><em>elevated.</em></h1><p>Discover exceptional products from ambitious sellers, all in one beautifully simple marketplace.</p><div className="hero-actions"><a className="primary" href="#shop">Explore products <ArrowRight size={18}/></a><button className="secondary" onClick={()=>user?setCartOpen(true):setAuthOpen(true)}>{user?'View your cart':'Sign in to shop'}</button></div><div className="orb orb-a"/><div className="orb orb-b"/></section><Catalog/><section className="features" id="about">{highlights.map(({icon:Icon,title,text})=><article key={title}><Icon size={22}/><h3>{title}</h3><p>{text}</p></article>)}</section><section className="discover"><div><span className="eyebrow">DISCOVER OLYMPUS</span><h2>Built for people<br/>who expect more.</h2></div><button className="round" aria-label="Open cart" onClick={()=>setCartOpen(true)}><ArrowRight/></button></section></main><footer><div className="brand">OLYMPUS<span>®</span></div><small>© 2026 Olympus Marketplace</small></footer><CartDrawer open={cartOpen} onClose={()=>setCartOpen(false)} onSignIn={()=>setAuthOpen(true)} onCheckout={setCheckout}/><AuthDialog open={authOpen} onClose={()=>setAuthOpen(false)} onAuthenticated={setUser}/></div>}
+createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

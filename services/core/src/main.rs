@@ -103,6 +103,7 @@ async fn main() {
         .route("/api/v1/orders", get(order_api::list))
         .route("/api/v1/orders/{id}", get(order_api::get))
         .route("/api/v1/orders/{order_id}/payments", post(payments::create))
+        .route("/api/v1/payments/{payment_id}", get(payment_api::get_status))
         .route("/api/v1/payments/{payment_id}/verify", post(payment_api::verify))
         .route("/api/v1/seller/dashboard", get(seller_dashboard::dashboard))
         .route("/api/v1/seller/analytics", get(seller_analytics::analytics))

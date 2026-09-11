@@ -56,11 +56,23 @@ async fn main() {
         ai: ai_client::AiClient::new(ai_url),
     };
 
-    let allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
-        .unwrap_or_else(|_| "http://localhost:3000,http://localhost:5173".into())
+    let configured_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:3000,http://localhost:5173".into());
+    let allowed_origins = configured_origins
         .split(',')
-        .filter_map(|origin| origin.trim().parse::<HeaderValue>().ok())
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(|origin| {
+            origin
+                .parse::<HeaderValue>()
+                .unwrap_or_else(|_| panic!("invalid CORS origin configured: {origin}"))
+        })
         .collect::<Vec<_>>();
+
+    if allowed_origins.is_empty() {
+        panic!("CORS_ALLOWED_ORIGINS must contain at least one valid origin");
+    }
+
     let cors = CorsLayer::new()
         .allow_origin(allowed_origins)
         .allow_headers([

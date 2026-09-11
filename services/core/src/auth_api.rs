@@ -100,6 +100,10 @@ pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<TokenResponse>, StatusCode> {
     let email = auth_validation::normalize_email(&req.email).ok_or(StatusCode::UNAUTHORIZED)?;
+    if !auth_validation::valid_login_password(&req.password) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
     let row: Option<(Uuid, String, String, String)> = sqlx::query_as(
         "SELECT id, password_hash, role, status FROM users WHERE lower(email) = $1 LIMIT 1",
     )

@@ -2,7 +2,7 @@ use axum::{extract::{Extension, State}, http::StatusCode, Json};
 use rust_decimal::Decimal;
 use serde::Serialize;
 use sqlx::FromRow;
-use crate::{auth::Claims, state::AppState};
+use crate::{auth::Claims, rbac::{authorize, Permission}, state::AppState};
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct RevenuePoint {
@@ -33,17 +33,11 @@ pub struct SellerAnalytics {
     pub category_mix: Vec<CategoryMix>,
 }
 
-fn authorized(role: &str) -> bool {
-    matches!(role, "SELLER" | "ADMIN" | "SUPER_ADMIN")
-}
-
 pub async fn analytics(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<SellerAnalytics>, StatusCode> {
-    if !authorized(claims.role.as_str()) {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    authorize(&claims, Permission::ViewSellerAnalytics)?;
 
     let seller_id = claims.sub;
     let revenue = sqlx::query_scalar::<_, Option<Decimal>>(

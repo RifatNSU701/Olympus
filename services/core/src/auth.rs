@@ -5,17 +5,24 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
+const JWT_ISSUER: &str = "olympus-core";
+const JWT_AUDIENCE: &str = "olympus-api";
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub sub: Uuid,
     pub email: String,
     pub role: String,
     pub exp: usize,
+    pub iss: String,
+    pub aud: String,
 }
 
 fn decode_token(token: &str, secret: &str) -> Result<Claims, StatusCode> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
+    validation.set_issuer(&[JWT_ISSUER]);
+    validation.set_audience(&[JWT_AUDIENCE]);
 
     decode::<Claims>(
         token,
@@ -57,9 +64,6 @@ pub async fn require_auth(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // The database is the source of truth for authorization. Refresh the mutable
-    // identity fields so a role change takes effect immediately without waiting
-    // for an existing JWT to expire.
     claims.email = email;
     claims.role = role;
 
@@ -69,7 +73,7 @@ pub async fn require_auth(
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_token, Claims};
+    use super::{decode_token, Claims, JWT_AUDIENCE, JWT_ISSUER};
     use jsonwebtoken::{encode, EncodingKey, Header};
     use uuid::Uuid;
 
@@ -79,6 +83,8 @@ mod tests {
             email: "user@example.com".into(),
             role: "BUYER".into(),
             exp,
+            iss: JWT_ISSUER.into(),
+            aud: JWT_AUDIENCE.into(),
         }
     }
 
@@ -97,6 +103,26 @@ mod tests {
         assert_eq!(decoded.sub, expected.sub);
         assert_eq!(decoded.email, expected.email);
         assert_eq!(decoded.role, expected.role);
+        assert_eq!(decoded.iss, JWT_ISSUER);
+        assert_eq!(decoded.aud, JWT_AUDIENCE);
+    }
+
+    #[test]
+    fn rejects_wrong_issuer() {
+        let secret = "test-secret";
+        let mut expected = claims((chrono::Utc::now().timestamp() + 300) as usize);
+        expected.iss = "another-service".into();
+        let token = encode(&Header::default(), &expected, &EncodingKey::from_secret(secret.as_bytes())).unwrap();
+        assert_eq!(decode_token(&token, secret), Err(axum::http::StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn rejects_wrong_audience() {
+        let secret = "test-secret";
+        let mut expected = claims((chrono::Utc::now().timestamp() + 300) as usize);
+        expected.aud = "another-api".into();
+        let token = encode(&Header::default(), &expected, &EncodingKey::from_secret(secret.as_bytes())).unwrap();
+        assert_eq!(decode_token(&token, secret), Err(axum::http::StatusCode::UNAUTHORIZED));
     }
 
     #[test]
@@ -108,7 +134,6 @@ mod tests {
             &EncodingKey::from_secret(secret.as_bytes()),
         )
         .unwrap();
-
         assert_eq!(decode_token(&token, secret), Err(axum::http::StatusCode::UNAUTHORIZED));
     }
 
@@ -120,18 +145,11 @@ mod tests {
             &EncodingKey::from_secret(b"correct-secret"),
         )
         .unwrap();
-
-        assert_eq!(
-            decode_token(&token, "wrong-secret"),
-            Err(axum::http::StatusCode::UNAUTHORIZED)
-        );
+        assert_eq!(decode_token(&token, "wrong-secret"), Err(axum::http::StatusCode::UNAUTHORIZED));
     }
 
     #[test]
     fn rejects_malformed_token() {
-        assert_eq!(
-            decode_token("not-a-jwt", "test-secret"),
-            Err(axum::http::StatusCode::UNAUTHORIZED)
-        );
+        assert_eq!(decode_token("not-a-jwt", "test-secret"), Err(axum::http::StatusCode::UNAUTHORIZED));
     }
 }

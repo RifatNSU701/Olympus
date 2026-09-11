@@ -21,6 +21,7 @@ mod seller_orders;
 mod state;
 
 use axum::{
+    extract::DefaultBodyLimit,
     http::{HeaderValue, Method},
     middleware,
     routing::{get, post, put},
@@ -124,6 +125,7 @@ async fn main() {
         .route("/api/v1/payments/webhook", post(payment_api::webhook))
         .merge(protected)
         .with_state(state)
+        .layer(DefaultBodyLimit::max(1_048_576))
         .layer(cors)
         .layer(PropagateRequestIdLayer::new(request_id.clone()))
         .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))

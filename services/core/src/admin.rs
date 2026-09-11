@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
-use crate::{auth::Claims, rbac::{authorize, Permission}, state::AppState};
+use crate::{auth::Claims, audit, rbac::{authorize, Permission}, state::AppState};
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct PlatformStats {
@@ -47,6 +47,7 @@ pub async fn update_user_status(State(state): State<AppState>, Extension(claims)
     let status = req.status.trim().to_uppercase();
     if !matches!(status.as_str(), "ACTIVE" | "SUSPENDED" | "BANNED") { return Err(StatusCode::BAD_REQUEST); }
     if id == claims.sub { return Err(StatusCode::CONFLICT); }
-    let user = sqlx::query_as::<_, AdminUser>("UPDATE users SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING id,email,full_name,role,status").bind(status).bind(id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    let user = sqlx::query_as::<_, AdminUser>("UPDATE users SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING id,email,full_name,role,status").bind(&status).bind(id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    audit::record(&state.pool, Some(claims.sub), audit::AuditEvent { action: "USER_STATUS_CHANGED", entity_type: "USER", entity_id: Some(id) }).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(user))
 }

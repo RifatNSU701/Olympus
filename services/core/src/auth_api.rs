@@ -1,7 +1,7 @@
 use crate::{auth::Claims, auth_validation, state::AppState};
-use argon2::{Argon2, password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString}};
-use axum::{Json, extract::{Extension, State}, http::StatusCode};
-use jsonwebtoken::{EncodingKey, Header, encode};
+use argon2::{password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString}, Argon2};
+use axum::{extract::{Extension, State}, http::StatusCode, Json};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -53,31 +53,29 @@ pub async fn register(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    if sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users WHERE lower(email) = $1 LIMIT 1",
-    )
-    .bind(&email)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .is_some()
-    {
-        return Err(StatusCode::CONFLICT);
-    }
-
     let salt = SaltString::generate(&mut OsRng);
     let hash = Argon2::default()
         .hash_password(req.password.as_bytes(), &salt)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .to_string();
 
-    let id: Uuid = sqlx::query_scalar("INSERT INTO users (email, password_hash, full_name, role, status) VALUES ($1, $2, $3, 'BUYER', 'ACTIVE') RETURNING id")
-        .bind(&email)
-        .bind(hash)
-        .bind(name)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, full_name, role, status) VALUES ($1, $2, $3, 'BUYER', 'ACTIVE') RETURNING id",
+    )
+    .bind(&email)
+    .bind(hash)
+    .bind(name)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|error| {
+        if error.as_database_error().and_then(|db| db.constraint()) == Some("users_email_lower_uidx") {
+            StatusCode::CONFLICT
+        } else if error.as_database_error().and_then(|db| db.constraint()) == Some("users_email_key") {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
 
     let claims = Claims {
         sub: id,

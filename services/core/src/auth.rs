@@ -1,7 +1,9 @@
-use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+use axum::{extract::{Request, State}, http::StatusCode, middleware::Next, response::Response};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::state::AppState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
@@ -24,12 +26,11 @@ fn decode_token(token: &str, secret: &str) -> Result<Claims, StatusCode> {
     .map_err(|_| StatusCode::UNAUTHORIZED)
 }
 
-pub async fn require_auth(mut request: Request, next: Next) -> Result<Response, StatusCode> {
-    let secret = request
-        .extensions()
-        .get::<String>()
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-
+pub async fn require_auth(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
     let authorization = request
         .headers()
         .get("authorization")
@@ -40,7 +41,20 @@ pub async fn require_auth(mut request: Request, next: Next) -> Result<Response, 
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let claims = decode_token(token, secret)?;
+    let claims = decode_token(token, &state.jwt_secret)?;
+
+    let status: Option<String> = sqlx::query_scalar("SELECT status FROM users WHERE id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match status.as_deref() {
+        Some("ACTIVE") => {}
+        Some(_) => return Err(StatusCode::FORBIDDEN),
+        None => return Err(StatusCode::UNAUTHORIZED),
+    }
+
     request.extensions_mut().insert(claims);
     Ok(next.run(request).await)
 }

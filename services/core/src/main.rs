@@ -4,6 +4,7 @@ mod ai_client;
 mod auth;
 mod auth_api;
 mod auth_validation;
+mod audit;
 mod cart;
 mod checkout;
 mod db;

@@ -39,6 +39,7 @@ pub async fn require_auth(
 
     let token = authorization
         .strip_prefix("Bearer ")
+        .filter(|token| !token.is_empty() && !token.chars().any(char::is_whitespace))
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let claims = decode_token(token, &state.jwt_secret)?;

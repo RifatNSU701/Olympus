@@ -3,11 +3,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
-use crate::{auth::Claims, state::AppState};
-
-fn is_admin(claims: &Claims) -> bool {
-    matches!(claims.role.as_str(), "ADMIN" | "SUPER_ADMIN")
-}
+use crate::{auth::Claims, rbac::{authorize, Permission}, state::AppState};
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct PlatformStats {
@@ -31,7 +27,7 @@ pub struct AdminUser {
 pub struct UpdateUserStatus { pub status: String }
 
 pub async fn stats(State(state): State<AppState>, Extension(claims): Extension<Claims>) -> Result<Json<PlatformStats>, StatusCode> {
-    if !is_admin(&claims) { return Err(StatusCode::FORBIDDEN); }
+    authorize(&claims, Permission::ManageUsers)?;
     let users = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users").fetch_one(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let sellers = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE role='SELLER'").fetch_one(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let products = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM products WHERE status <> 'DELETED'").fetch_one(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -41,13 +37,13 @@ pub async fn stats(State(state): State<AppState>, Extension(claims): Extension<C
 }
 
 pub async fn list_users(State(state): State<AppState>, Extension(claims): Extension<Claims>) -> Result<Json<Vec<AdminUser>>, StatusCode> {
-    if !is_admin(&claims) { return Err(StatusCode::FORBIDDEN); }
+    authorize(&claims, Permission::ManageUsers)?;
     let users = sqlx::query_as::<_, AdminUser>("SELECT id,email,full_name,role,status FROM users ORDER BY created_at DESC LIMIT 200").fetch_all(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(users))
 }
 
 pub async fn update_user_status(State(state): State<AppState>, Extension(claims): Extension<Claims>, Path(id): Path<Uuid>, Json(req): Json<UpdateUserStatus>) -> Result<Json<AdminUser>, StatusCode> {
-    if !is_admin(&claims) { return Err(StatusCode::FORBIDDEN); }
+    authorize(&claims, Permission::ManageUsers)?;
     let status = req.status.trim().to_uppercase();
     if !matches!(status.as_str(), "ACTIVE" | "SUSPENDED" | "BANNED") { return Err(StatusCode::BAD_REQUEST); }
     if id == claims.sub { return Err(StatusCode::CONFLICT); }

@@ -9,7 +9,7 @@ use sha2::Sha256;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::{auth::Claims, state::AppState};
+use crate::{auth::Claims, audit, state::AppState};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -98,7 +98,11 @@ pub async fn verify(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut tx = state.pool.begin().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let payment = sqlx::query_as::<_, PaymentStatus>(
         "SELECT p.id,p.order_id,p.provider,p.status,p.amount,p.currency,p.provider_reference FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$1 AND o.buyer_id=$2 FOR UPDATE",
     )
@@ -110,7 +114,9 @@ pub async fn verify(
     .ok_or(StatusCode::NOT_FOUND)?;
 
     if payment.status == "PAID" {
-        tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tx.commit()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Ok(Json(payment));
     }
     if payment.status != "PENDING" {
@@ -136,7 +142,29 @@ pub async fn verify(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let action = if req.success {
+        "PAYMENT_PAID"
+    } else {
+        "PAYMENT_FAILED"
+    };
+    if let Err(error) = audit::record(
+        &state.pool,
+        Some(claims.sub),
+        audit::AuditEvent {
+            action,
+            entity_type: "PAYMENT",
+            entity_id: Some(payment_id),
+        },
+    )
+    .await
+    {
+        tracing::warn!(payment_id = %payment_id, %error, "failed to record payment status audit event");
+    }
+
     Ok(Json(updated))
 }
 
@@ -164,7 +192,11 @@ pub async fn webhook(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let mut tx = state.pool.begin().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let payment = sqlx::query_as::<_, PaymentStatus>(
         "SELECT id,order_id,provider,status,amount,currency,provider_reference FROM payments WHERE id=$1 FOR UPDATE",
     )
@@ -178,7 +210,9 @@ pub async fn webhook(
         return Err(StatusCode::BAD_REQUEST);
     }
     if payment.status == status {
-        tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tx.commit()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Ok(Json(payment));
     }
     if payment.status != "PENDING" {
@@ -202,7 +236,29 @@ pub async fn webhook(
         .execute(&mut *tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let action = if status == "PAID" {
+        "PAYMENT_PAID"
+    } else {
+        "PAYMENT_FAILED"
+    };
+    if let Err(error) = audit::record(
+        &state.pool,
+        None,
+        audit::AuditEvent {
+            action,
+            entity_type: "PAYMENT",
+            entity_id: Some(req.payment_id),
+        },
+    )
+    .await
+    {
+        tracing::warn!(payment_id = %req.payment_id, %error, "failed to record webhook payment audit event");
+    }
+
     Ok(Json(updated))
 }
 
@@ -227,7 +283,11 @@ mod tests {
         mac.update(payload);
         let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
         assert!(verify_webhook_signature(secret, payload, &signature));
-        assert!(verify_webhook_signature(secret, payload, signature.trim_start_matches("sha256=")));
+        assert!(verify_webhook_signature(
+            secret,
+            payload,
+            signature.trim_start_matches("sha256=")
+        ));
     }
 
     #[test]

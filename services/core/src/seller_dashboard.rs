@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use sqlx::FromRow;
 use uuid::Uuid;
-use crate::{auth::Claims, state::AppState};
+use crate::{auth::Claims, rbac::{authorize, Permission}, state::AppState};
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct SellerDashboard {
@@ -17,9 +17,7 @@ pub async fn dashboard(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<SellerDashboard>, StatusCode> {
-    if !matches!(claims.role.as_str(), "SELLER" | "ADMIN" | "SUPER_ADMIN") {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    authorize(&claims, Permission::SellerOperations)?;
 
     let product_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM products WHERE seller_id=$1 AND status <> 'DELETED'",

@@ -61,6 +61,24 @@ pub fn verify_webhook_signature(secret: &[u8], payload: &[u8], signature: &str) 
     mac.verify_slice(&provided_bytes).is_ok()
 }
 
+pub async fn get_status(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(payment_id): Path<Uuid>,
+) -> Result<Json<PaymentStatus>, StatusCode> {
+    let payment = sqlx::query_as::<_, PaymentStatus>(
+        "SELECT p.id,p.order_id,p.provider,p.status,p.amount,p.currency,p.provider_reference FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$1 AND o.buyer_id=$2",
+    )
+    .bind(payment_id)
+    .bind(claims.sub)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(payment))
+}
+
 pub async fn verify(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,

@@ -1,4 +1,4 @@
-use crate::{auth::Claims, state::AppState};
+use crate::{auth::Claims, auth_validation, state::AppState};
 use argon2::{Argon2, password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString}};
 use axum::{Json, extract::{Extension, State}, http::StatusCode};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -47,12 +47,12 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<TokenResponse>), StatusCode> {
+    let email = auth_validation::normalize_email(&req.email).ok_or(StatusCode::BAD_REQUEST)?;
     let name = req.full_name.trim();
-    if !req.email.contains('@') || req.password.len() < 8 || name.is_empty() || name.len() > 160 {
+    if !auth_validation::valid_registration(&req.password, name) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let email = req.email.trim().to_lowercase();
     if sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM users WHERE lower(email) = $1 LIMIT 1",
     )
@@ -99,7 +99,7 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<TokenResponse>, StatusCode> {
-    let email = req.email.trim().to_lowercase();
+    let email = auth_validation::normalize_email(&req.email).ok_or(StatusCode::UNAUTHORIZED)?;
     let row: Option<(Uuid, String, String, String)> = sqlx::query_as(
         "SELECT id, password_hash, role, status FROM users WHERE lower(email) = $1 LIMIT 1",
     )

@@ -42,19 +42,26 @@ pub async fn require_auth(
         .filter(|token| !token.is_empty() && !token.chars().any(char::is_whitespace))
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let claims = decode_token(token, &state.jwt_secret)?;
+    let mut claims = decode_token(token, &state.jwt_secret)?;
 
-    let status: Option<String> = sqlx::query_scalar("SELECT status FROM users WHERE id = $1")
-        .bind(claims.sub)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let user: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT email, role, status FROM users WHERE id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    match status.as_deref() {
-        Some("ACTIVE") => {}
-        Some(_) => return Err(StatusCode::FORBIDDEN),
-        None => return Err(StatusCode::UNAUTHORIZED),
+    let (email, role, status) = user.ok_or(StatusCode::UNAUTHORIZED)?;
+    if status != "ACTIVE" {
+        return Err(StatusCode::FORBIDDEN);
     }
+
+    // The database is the source of truth for authorization. Refresh the mutable
+    // identity fields so a role change takes effect immediately without waiting
+    // for an existing JWT to expire.
+    claims.email = email;
+    claims.role = role;
 
     request.extensions_mut().insert(claims);
     Ok(next.run(request).await)

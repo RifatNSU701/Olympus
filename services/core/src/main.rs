@@ -13,6 +13,7 @@ mod orders;
 mod payment_api;
 mod payments;
 mod products;
+mod rbac;
 mod security;
 mod seller_analytics;
 mod seller_dashboard;

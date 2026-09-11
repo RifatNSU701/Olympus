@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{auth::Claims, state::AppState};
+use crate::{auth::Claims, checkout, state::AppState};
 
 #[derive(Deserialize)]
 pub struct CheckoutRequest {
@@ -36,17 +36,10 @@ pub async fn checkout(
 ) -> Result<(StatusCode, Json<OrderResponse>), StatusCode> {
     let idempotency_key = req.idempotency_key.trim();
     let shipping_address = req.shipping_address.trim();
-    if idempotency_key.is_empty()
-        || idempotency_key.len() > 120
-        || shipping_address.is_empty()
-        || shipping_address.len() > 500
-    {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
     let shipping = req.shipping_amount.unwrap_or(Decimal::ZERO);
     let tax = req.tax_amount.unwrap_or(Decimal::ZERO);
-    if shipping.is_sign_negative() || tax.is_sign_negative() {
+
+    if !checkout::validate_checkout_inputs(idempotency_key, shipping_address, shipping, tax) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -65,6 +58,9 @@ pub async fn checkout(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     {
+        tx.rollback()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Ok((
             StatusCode::OK,
             Json(OrderResponse {
@@ -100,12 +96,15 @@ pub async fn checkout(
 
     let mut subtotal = Decimal::ZERO;
     for (_, _, _, quantity, price, stock) in &items {
+        if *quantity <= 0 {
+            return Err(StatusCode::BAD_REQUEST);
+        }
         if *quantity > *stock {
             return Err(StatusCode::CONFLICT);
         }
         subtotal += *price * Decimal::from(*quantity);
     }
-    let total = subtotal + shipping + tax;
+    let total = checkout::calculate_total(subtotal, shipping, tax);
 
     let order = sqlx::query_as::<_, (Uuid, String, String, Decimal, Decimal, Decimal, Decimal, String)>(
         "INSERT INTO orders (buyer_id,status,currency,subtotal,shipping_amount,tax_amount,total_amount,idempotency_key,shipping_address) VALUES ($1,'PENDING_PAYMENT','BDT',$2,$3,$4,$5,$6,$7) RETURNING id,status,currency,subtotal,shipping_amount,tax_amount,total_amount,shipping_address",

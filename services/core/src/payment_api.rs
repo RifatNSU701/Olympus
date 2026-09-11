@@ -67,6 +67,14 @@ pub async fn verify(
     Path(payment_id): Path<Uuid>,
     Json(req): Json<VerifyPayment>,
 ) -> Result<Json<PaymentStatus>, StatusCode> {
+    if std::env::var("OLYMPUS_ALLOW_SIMULATED_PAYMENTS")
+        .ok()
+        .as_deref()
+        != Some("true")
+    {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+
     let reference = req.provider_reference.trim();
     if reference.is_empty() || reference.len() > 160 {
         return Err(StatusCode::BAD_REQUEST);
